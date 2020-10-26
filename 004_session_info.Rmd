@@ -1,0 +1,19 @@
+---
+title: "Correlation, network and heatmap plots"
+subtitle: "Session info"
+date: "`r Sys.Date()`"
+output: html_document
+header-includes: |
+    \usepackage{caption}
+    \usepackage{placeins}
+    \usepackage{subfig}
+---
+
+
+```{r}
+getwd()
+```
+
+```{r}
+sessionInfo()
+```

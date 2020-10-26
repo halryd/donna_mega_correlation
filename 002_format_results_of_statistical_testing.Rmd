@@ -1,0 +1,385 @@
+---
+title: "Correlation, network and heatmap plots"
+subtitle: "Format results of statistical testing"
+date: "`r Sys.Date()`"
+output: html_document
+header-includes: |
+    \usepackage{caption}
+    \usepackage{placeins}
+    \usepackage{subfig}
+---
+
+## Load R packages
+
+```{r message=FALSE}
+library(tidyverse)
+library(readxl)
+library(stringr)
+library(psych)
+library(gdata)
+library(qgraph)
+library(kableExtra)
+```
+
+
+
+
+```{r}
+load(file = paste("./saved_data/time_span_of_interest.RData", sep=""))
+if (time_span_of_interest=="timepoint_b"){
+  fn ="001_read_and_format_data_and_stat_testing_tpb.RData"
+}else if(time_span_of_interest=="timeinterval_cde"){
+  fn ="001_read_and_format_data_and_stat_testing_ticde.RData"
+}
+```
+
+## Load data from previous step
+```{r}
+loaded_objects_from_step_1 = load(file = paste("./saved_data/",fn, sep=""))
+loaded_objects_from_step_1
+```
+
+## Filter r values of correlation matrix with values of p-value matrix
+
+For the network plot we only want to display correlations that are significant.
+Therefore we use the p-value matrix to filter the correlation matrix so that non significant correlation are set to zero.
+
+
+```{r}
+
+sign_corr_mats.lst <- list()
+
+for (i in 1:length(corr_lst.0.0)){
+  
+  # Filter corelation matrix
+  r.mat <- corr_lst.0.0[[i]]$r
+  p.mat <- corr_lst.0.0[[i]]$p
+  n.mat <- corr_lst.0.0[[i]]$n
+
+  
+  lowerTriangle(p.mat) <- upperTriangle(p.mat, byrow=TRUE)
+  sign_corr.mat.0.0 = ifelse(p.mat < 0.05, r.mat , NA) # make all nonsinificant to na for oth
+  sign_corr.mat.0.0[sign_corr.mat.0.0==1]<- NaN # also make r = 1 to NA since this is cyt vs cyt corr and dont need display
+  sign_corr.mat.0.0 %>% as_tibble() %>% filter_all(any_vars(!is.na(.))) # remove samples that are all NA
+  # reduce dfs so that every row and every column has at least one value
+  dim(sign_corr.mat.0.0) # check dimensions before reduction
+  sign_corr.mat.0.1  <- sign_corr.mat.0.0[,colSums(!is.na(sign_corr.mat.0.0 ))>0] # keep all columns with sum larger than 0
+  sign_corr.mat.0.2  <- sign_corr.mat.0.1[rowSums(!is.na(sign_corr.mat.0.0 ))>0,] # keep all columns with sum larger than 0
+  dim(sign_corr.mat.0.2) # check dimensions after reduction
+  sign_corr.mat.0.2[is.na(sign_corr.mat.0.2)] <- 0 # replace NA with 0
+  
+  sign_corr_mats.lst[[i]] <- sign_corr.mat.0.2
+}
+
+```
+
+## Make function that takes a list of correlation matrix and a list of pval matrixes and filter r values of correlation matrix with values of p-value matrix
+
+For the network plot we only want to display correlations that are significant.
+Therefore we use the p-value matrix to filter the correlation matrix so that non significant correlation are set to zero.
+
+
+```{r}
+
+reduce_cor_mat_to_only_sign <- function(r,p) {
+  sign_corr_mats.lst <- list()
+
+  for (i in 1:length(r)){
+    
+    # Filter corelation matrix
+    r.mat <- r[[i]]
+    p.mat <- p[[i]]
+  
+    lowerTriangle(p.mat) <- upperTriangle(p.mat, byrow=TRUE)
+    sign_corr.mat.0.0 = ifelse(p.mat < 0.05, r.mat , NA) # make all nonsinificant to na for oth
+    sign_corr.mat.0.0[sign_corr.mat.0.0==1]<- NaN # also make r = 1 to NA since this is cyt vs cyt corr and dont need display
+    sign_corr.mat.0.0 %>% as_tibble() %>% filter_all(any_vars(!is.na(.))) # remove samples that are all NA
+    # reduce dfs so that every row and every column has at least one value
+    dim(sign_corr.mat.0.0) # check dimensions before reduction
+    sign_corr.mat.0.1  <- sign_corr.mat.0.0[,colSums(!is.na(sign_corr.mat.0.0 ))>0] # keep all columns with sum larger than 0
+    sign_corr.mat.0.2  <- sign_corr.mat.0.1[rowSums(!is.na(sign_corr.mat.0.0 ))>0,] # keep all columns with sum larger than 0
+    dim(sign_corr.mat.0.2) # check dimensions after reduction
+    sign_corr.mat.0.2[is.na(sign_corr.mat.0.2)] <- 0 # replace NA with 0
+    
+    sign_corr_mats.lst[[i]] <- sign_corr.mat.0.2
+  }
+sign_corr_mats.lst
+}
+
+
+```
+
+
+## Apply function on corr_lst_clin_group_0 and corr_lst_clin_group_1
+```{r}
+sign_corr_lst_clin_group_0 <- reduce_cor_mat_to_only_sign(corr_lst_clin_group_0.rval,corr_lst_clin_group_0.pval)
+sign_corr_lst_clin_group_1 <- reduce_cor_mat_to_only_sign(corr_lst_clin_group_1.rval,corr_lst_clin_group_1.pval)
+```
+
+
+## Create a list of significant cytokine names and growth factor names
+The list will be used for coloring the nodes in the network plot respectively. The purpose of this chunk is to split the names vector of cytokines and growth factor into two list items (on for cytokines and one for growth factors). This will be used for color coding the nodes in the network plots.
+
+```{r}
+
+sign_cyts_and_gfs.lst <- list()
+
+for (i in 1:length(corr_lst.0.0)){
+
+  # select cytokine names
+  cyts.oth.0.1 <- cyts0.0[cyts0.0 %in% row.names(sign_corr_mats.lst[[i]])] # check what cytokines that have significant correlation
+  cyts.infl.0.1 <- cyts0.0[cyts0.0 %in% row.names(sign_corr_mats.lst[[i]])] # also for infl
+  
+  cyts.oth.0.2 <- seq(length(cyts.oth.0.1 )) # make incremental sequence from 1 to length of cyts that are significant
+  
+  # select growth factors other
+  if(any(gfs0.0 %in% row.names(sign_corr_mats.lst[[i]]))){
+    gfs.oth.0.1 <- gfs0.0[gfs0.0 %in% row.names(sign_corr_mats.lst[[i]])] # check what growth factors that have significant correlation
+    gfs.oth.0.2 <- seq(max(cyts.oth.0.2)+1,length(c(cyts.oth.0.1,gfs.oth.0.1))) # make incremental sequence that starts where cytokine list  ended and incements with length of grothfactors that are significant
+    gf_cyt_groups_corr.mat <- list(cytokines=cyts.oth.0.2,growthfactors=gfs.oth.0.2 )
+  } else {
+    gf_cyt_groups_corr.mat <- list(cytokines=cyts.oth.0.2)
+  }
+  sign_cyts_and_gfs.lst[[i]] <-  gf_cyt_groups_corr.mat
+}
+```
+
+## Create a function that creates a list of significant cytokine names and growthfactor names
+The list will be used for coloring the nodes in the network plot respectively. The purpose of this chunk is to split the names vector of cytokines and growth factor into two list items (on for cytokines and one for growth factors). This will be used for color coding the nodes in the network plots.
+
+```{r}
+get_names_of_significant_cyts_and_gfs <- function(corr_lst_clin_group.rval,sign_corr_mats.lst) {
+  sign_cyts_and_gfs.lst <- list()
+  
+  for (i in 1:length(corr_lst_clin_group.rval)){#sign_corr_mats.lst
+  
+    # select cytokine names
+    cyts.oth.0.1 <- cyts0.0[cyts0.0 %in% row.names(sign_corr_mats.lst[[i]])] # check what cytokines that have significant correlation
+    cyts.infl.0.1 <- cyts0.0[cyts0.0 %in% row.names(sign_corr_mats.lst[[i]])] # also for infl
+    
+    cyts.oth.0.2 <- seq(length(cyts.oth.0.1 )) # make incremental sequence from 1 to length of cyts that are significant
+    
+    # select growth factors other
+    if(any(gfs0.0 %in% row.names(sign_corr_mats.lst[[i]]))){
+      gfs.oth.0.1 <- gfs0.0[gfs0.0 %in% row.names(sign_corr_mats.lst[[i]])] # check what growth factors that have significant correlation
+      gfs.oth.0.2 <- seq(max(cyts.oth.0.2)+1,length(c(cyts.oth.0.1,gfs.oth.0.1))) # make incremental sequence that starts where cytokine list  ended and incements with length of grothfactors that are significant
+      gf_cyt_groups_corr.mat <- list(cytokines=cyts.oth.0.2,growthfactors=gfs.oth.0.2 )
+    } else {
+      gf_cyt_groups_corr.mat <- list(cytokines=cyts.oth.0.2)
+    }
+    sign_cyts_and_gfs.lst[[i]] <-  gf_cyt_groups_corr.mat
+  }
+  sign_cyts_and_gfs.lst
+}
+
+
+```
+
+## Apply get_names_of_significant_cyts_and_gfs
+```{r}
+sign_cyts_and_gfs.lst_0 <- get_names_of_significant_cyts_and_gfs(corr_lst_clin_group_0.rval,sign_corr_lst_clin_group_0)
+sign_cyts_and_gfs.lst_1 <- get_names_of_significant_cyts_and_gfs(corr_lst_clin_group_1.rval,sign_corr_lst_clin_group_1)
+```
+
+
+## Filter z values of matrix of difference in correlation with values of corrsponding p-value matrix
+
+We want the correlation plots of the difference in correlation to show only significant differences therefor we will filter out the non significant z-values from the matrix that was received as output.
+Therefore we use the p-value matrix to filter the correlation matrix so that non significant correlation are set to zero.
+(We would like the pairwise correlations between cytokines and/or growthfactors determine the thickness fo the edges.)
+
+```{r}
+cor_diff.lst <- list()
+cor_diff_groups.lst  <- list()
+for (i in 1:length(paired_corr.lst.zval)){
+  z_score <- paired_corr.lst.zval[[i]]  
+  p_val <- paired_corr.lst.pval[[i]]  
+  
+  # make function to replace NaN in df with 0
+  is.nan.data.frame <- function(x)
+  do.call(cbind, lapply(x, is.nan))
+  # make copy of p_val
+  p_val.0.0 <- p_val
+  #apply function createdd above
+  p_val.0.0 [is.nan(p_val.0.0 )] <- 1
+  
+  z_score.0.1 <- z_score
+  # replace any z-values hta are zero  with 1. Why ????
+  z_score.0.1[z_score.0.1==0] <- 1
+  
+  # set all unsignificant z-scores to NA
+  sign_z = ifelse(p_val.0.0 < 0.05, z_score.0.1, NA)
+  dim(sign_z)
+  #Keep only columns with sum larger that 0
+  sig_ele0<-sign_z[,colSums(!is.na(sign_z))>0] 
+  dim(sig_ele0)
+  #Keep only rows with sum larger that 0
+  sign_z1<-sig_ele0[rowSums(!is.na(sig_ele0))>0,] 
+  dim(sign_z1)
+  #replace any na value with 0
+  sign_z1[is.na(sign_z1)] <- 0
+  
+  
+  # makes list of groups
+  #gfs0.0 <- c("IGF1","BDNF","EPO","PDGF_BB","VEGF_A")
+  #cyts0.0 <- c("IL1b","IL2","IL4","IL5","IL6","IL7","IL8","IL10","IL12p70","IL13","2IL172","TNFa","MIP1b","MCP1MCAF","IFNg","GMCSF","GCSF")
+  cyts0.1<- cyts0.0[cyts0.0 %in% row.names(sign_z1)]
+  cyts0.2 <- seq(length(cyts0.1))
+  
+  # 
+  # gfs0.1 <- gfs0.0[gfs0.0 %in% row.names(sign_z1)]
+  # gfs0.2 <- seq(max(cyts0.2)+1,length(c(cyts0.1,gfs0.1)))
+  # gf_cyt_groups_corr_change <- list(cytokines=cyts0.2,growthfactors=gfs0.2)
+  # 
+  # 
+  
+  
+   # select growth factors other
+    if(any(gfs0.0 %in% row.names(sign_z1))){
+      gfs0.1 <- gfs0.0[gfs0.0 %in% row.names(sign_z1)] # check what growth factors that have significant correlation
+      gfs0.2 <- seq(max(cyts0.2)+1,length(c(cyts0.1,gfs0.1))) # make incremental sequence that starts where cytokine list  ended and incements with length of grothfactors that are significant
+      gf_cyt_groups_corr_change <- list(cytokines=cyts0.2,growthfactors=gfs0.2)
+    } else {
+      gf_cyt_groups_corr_change <- list(cytokines=cyts0.2)
+    }
+  
+  cor_diff.lst[[i]] <- sign_z1
+  cor_diff_groups.lst[[i]] <- gf_cyt_groups_corr_change
+}
+
+names(cor_diff.lst) <- names(clin_outs)
+```
+
+## Prepare vectors with cytokines and growth factors with significant diffenrences in correlation  for each clinical group
+For each clinical group, collect all cytokines and growth factors with significant changes in correlation into a vector. Create similar vectors with corresponding sums of z-values. Sort the vectors by the sums of z-values. bind vectors together as columns in a matrix
+
+```{r}
+#http://www.sthda.com/english/wiki/correlation-matrix-formatting-and-visualization
+# ++++++++++++++++++++++++++++
+# flattenCorrMatrix or in this case zMatrix
+# ++++++++++++++++++++++++++++
+# cormat : matrix of the correlation coefficients
+# pmat : matrix of the correlation p-values
+flattenCorrMatrix <- function(cormat, pmat) {
+  ut <- upper.tri(cormat) # Returns a matrix of logicals the same size of a given matrix with entries TRUE in the lower or upper triangle.
+  data.frame(
+    row = rownames(cormat)[row(cormat)[ut]], # make vector of row names for each value of upper triangle ant set as first column
+    column = rownames(cormat)[col(cormat)[ut]], # make vector of column names for each value of upper triangle ant set as first column
+    cor  =(cormat)[ut], # make vector of each r-score or z-score  of upper triangle
+    p = pmat[ut] # make vector of each p-value of upper triangle
+  )
+}
+```
+
+
+```{r}
+ranked_peps <- list()
+ranked_z <- list()
+list_versions <- list()
+for (i in 1:length(paired_corr.lst.zval)){
+  Z <- paired_corr.lst.zval[[i]]  # put z-scores in array A
+  normalized = (Z-min(Z,na.rm=T))/(max(Z,na.rm=T)-min(Z,na.rm=T))  #Normalized/standardize z-scores (make z scores vary between 1 and 0: Not really needed)
+  B <- paired_corr.lst.pval[[i]] #put p-values in array B
+  sign_z = ifelse(B < 0.05, normalized, NA)# filter in only significant z-scores
+  
+  #make tibbles
+  tb.p <- as_tibble(B)
+  tb.z <- as_tibble(sign_z)
+  
+  df.sign <- data.frame((tb.p < 0.05) * 1) # recode p-vals to binary
+  m.sign <- as.matrix(df.sign) # make binary significance df into matrix again
+  
+  rownames(m.sign) <- colnames(m.sign) #assign rownames# renamed rownames(m.sign.z) to m.sign
+
+
+  # make longer make tibble() and group by column
+  # The matrices of z-vals and p-vals are made into a tibble with four columns row,col, cor and p-val.
+  z_score_and_sig_long <- flattenCorrMatrix(sign_z, m.sign) %>% tibble() 
+  
+  # !!!!!!This step really dont seem necessary it is using p-val to filter in sing z-score as has allready been done!!!!!
+  sig_z_score_long <- z_score_and_sig_long %>% mutate(sig_z=cor*p) # create new variable sig_z
+
+  sig_z_score_long_row <- sig_z_score_long %>% group_by(row) # group by row (of upper triangle of correlation matrix)
+  sig_z_score_long_col <- sig_z_score_long %>% group_by(column) # and group by column (of upper triangle of correlation matrix that has now been made longer)
+  
+  # sum z-scores per row/peptide and sort
+  sum.z.sort_row <- sig_z_score_long_row %>% summarize(sum=sum(sig_z, na.rm = TRUE)) 
+  # get number of sign z per row
+  numb.z.row <- sig_z_score_long_row %>% na.omit() %>% tally()#summarize(n=n(sig_z, na.rm = TRUE)) 
+  # sum z-scores per col/peptide and sort
+  sum.z.sort_col <- sig_z_score_long_col %>% summarize(sum=sum(sig_z, na.rm = TRUE)) 
+  # get number of sign z per col
+  numb.z.col <- sig_z_score_long_col %>% na.omit() %>% tally()
+ 
+  #join row and col sums
+  sum.z.sort0.0 <- full_join(sum.z.sort_row, sum.z.sort_col, by = c("row" = "column")) 
+  # join row and col counts of sign z (need this as an effect of making selecting upper triangle of correlation and making long)
+  numb.z.sort0.0 <- full_join(numb.z.row, numb.z.col, by = c("row" = "column")) 
+  # Since IL1b becomes NA in one column and VEGF_A in the other they need to be given value 0 so they dont crate probs later
+  sum.z.sort0.1 <- sum.z.sort0.0 %>% 
+    tidyr::replace_na(list(row=0,sum.x=0,sum.y=0)) 
+  # Replace NA with zeros to avoid problems later
+  numb.z.sort0.1 <- numb.z.sort0.0 %>% 
+    tidyr::replace_na(list(row=0,n.x=0,n.y=0)) 
+  
+  #add row and col sums together, select, sort
+  sum.z.sort <- sum.z.sort0.1 %>% mutate(sum_sig_z=sum.x+sum.y) %>% select(row,sum_sig_z) %>% arrange(by=desc(sum_sig_z))
+  numb.z.sort <- numb.z.sort0.1 %>% mutate(numb_sig_z=n.x+n.y) %>% select(row,numb_sig_z) %>% arrange(by=desc(numb_sig_z))
+  # sort numb.z.sort rows by sum.z.sort$row and select the row with counts
+  counts_sig_z <- numb.z.sort[match(sum.z.sort$row, numb.z.sort$row),][,2]
+  # bind cols to be pasted together
+  peps_sum.z.sort.0 <- cbind(sum.z.sort[,1],counts_sig_z)
+  # paste/unite sorted numb.z.sort$numb_sig_z to sum.z.sort$row
+  peps_sum.z.sort.1 <- unite(as_tibble(peps_sum.z.sort.0), newCol)
+  sum.z.sort[,1] <- peps_sum.z.sort.1 
+  
+  # rename row (previosly peptide) column to sub_clin_out variable value
+  names(sum.z.sort)[names(sum.z.sort ) == "row"] <- names(paired_corr.lst.zval)[i]
+  # rename sum_z column to sub_clin_out variable value
+  names(sum.z.sort )[names(sum.z.sort ) == "sum_sig_z"] <- names(paired_corr.lst.zval)[i]
+  # collect ranked peptides for sub_clin_out into ranked_peps
+  ranked_peps[[i]] <- sum.z.sort[,1]
+  # collect sums  of z values  for sub_clin_out inte ranked_z
+  ranked_z[[i]] <- sum.z.sort[,2]
+
+}
+
+ranked_peps_tb <-bind_cols(ranked_peps) #table with only peptides
+ranked_z_tb <-bind_cols(ranked_z) #table with only z-scores
+
+ranked_peps_tb %>% names() #check the names of the tables
+ranked_z_tb  %>% names()
+
+#make z-val table long, group by clin_ut, summaraize and arrange by summed z-score
+ranked_z_tb.sum.sort <- ranked_z_tb %>% pivot_longer(cols=names(ranked_z_tb),names_to = "clin_out",values_to = "z_score") %>% group_by(clin_out) %>% summarise(z_score = sum(z_score)) %>% arrange(by=desc(z_score))
+
+ranked_peps_tb.0.0 <- ranked_peps_tb[ranked_z_tb.sum.sort$clin_out] # use clin_out col to order 
+ranked_z_tb.0.0 <- ranked_z_tb[ranked_z_tb.sum.sort$clin_out]
+```
+
+## Save data objects for following steps
+
+```{r}
+if (time_span_of_interest=="timepoint_b"){
+  fn ="002_format_results_of_statistical_testing_tpb.RData"
+}else if(time_span_of_interest=="timeinterval_cde"){
+  fn ="002_format_results_of_statistical_testing_ticde.RData"
+}
+```
+
+```{r}
+save(corr_lst.0.0,
+     gfs0.0,
+     sign_corr_mats.lst,
+     sign_corr_lst_clin_group_0,
+     sign_corr_lst_clin_group_1,
+     sign_cyts_and_gfs.lst,
+     sign_cyts_and_gfs.lst_0,
+     sign_cyts_and_gfs.lst_1,
+     cor_diff.lst,
+     cor_diff_groups.lst,
+     ranked_peps_tb.0.0,
+     ranked_z_tb.0.0,
+     file = paste("./saved_data/",fn, sep=""))
+
+```

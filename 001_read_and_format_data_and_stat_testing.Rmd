@@ -1,0 +1,313 @@
+---
+title: "Correlation, network and heatmap plots"
+subtitle: "Read and format raw data and perform statistical testing"
+date: "`r Sys.Date()`"
+output: html_document
+header-includes: |
+    \usepackage{caption}
+    \usepackage{placeins}
+    \usepackage{subfig}
+---
+
+## Load R packages and read in data
+
+```{r message=FALSE}
+library(tidyverse)
+library(readxl)
+library(stringr)
+library(psych)
+library(gdata)
+library(qgraph)
+library(kableExtra)
+```
+
+
+```{r setup, include=FALSE}
+#knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = '/Users/xrydbh/GU/projects/donna_mega_cytokiner/methods')
+```
+
+```{r}
+df.0.0  <- as.data.frame(read_excel("../file_for_publication/donna_mega_file_for_publication.1.1.xlsx", sheet = 1))
+```
+
+## This section can be read/edited after the first default output has been generated
+
+> **_NOTE:_**  These 3 R markdown scripts can be used to generate plots based on log10 values of cytokine concentration measurements for time point b or based on log10 of the area under the curve of the concentration measurements for time interval c,d and e. The option is set by commenting out one of the two lines below. Make sure to put the output in a folder marked as time_point_b or time_interval_cde resepectivley before rerunning with new setting of time_span_of_interest.
+
+```{r}
+################## comment out one of the options below ##################
+ #time_span_of_interest <- "timepoint_b"
+time_span_of_interest <- "timeinterval_cde"
+```
+
+
+```{r}
+df.0.0 <- df.0.0 %>% rename("GAD_continuos"=GAD)
+if (time_span_of_interest=="timepoint_b"){
+  #set name suffix and remove it from names of concentration variables
+  names_suffix <- "_b_log10"  
+  cyt_names <- df.0.0 %>% 
+  names() %>% 
+  str_subset(names_suffix)    # create list of cytokien names by removing suffix
+  # need to remove ticde_ and ti_cde_ to avoid name dupliclation
+  df.0.0 <- df.0.0  %>% select(-contains(c("ticde","ti_cde")))
+  # remove dich_by_median_ from dichotomies variables
+  df.0.0 <- df.0.0  %>%   rename_at(.vars = vars(starts_with("dich_by_median_")),
+            .funs = funs(sub("dich_by_median_", "", .)))
+  #remove tpb_ from GAD and brain volume variables
+  df.0.0 <- df.0.0  %>%   rename_at(.vars = vars(starts_with("tpb_")),
+            .funs = funs(sub("tpb_", "", .)))                            
+}else if(time_span_of_interest=="timeinterval_cde"){
+  # set and removes names suffix af AUC variables
+  names_suffix <- "_log10_avg_cde_auc"
+  cyt_names <- df.0.0 %>% 
+  names() %>% 
+  str_subset(names_suffix)    # create list of cytokien names by removing suffix
+  # need to remove tpb_to avoid name dupliclation
+  df.0.0 <- df.0.0  %>% select(-contains(c("tpb_")))
+  # remove dich_by_median_ from dichotomies variables
+  df.0.0 <- df.0.0  %>%   rename_at(.vars = vars(starts_with("dich_by_median_")),
+            .funs = funs(sub("dich_by_median_", "", .)))
+  #remove ticde_ from GAD variable
+  df.0.0 <- df.0.0  %>%   rename_at(.vars = vars(starts_with("ticde_")),
+            .funs = funs(sub("ticde_", "", .)))  
+  #remove ti_cde_ from brain volume variables
+  df.0.0 <- df.0.0  %>%   rename_at(.vars = vars(starts_with("ti_cde_")),
+            .funs = funs(sub("ti_cde_", "", .)))                           
+}else{
+  print("you have to set the time_span_of_interest variable to either timepoint_b or timeinterval_cde")
+}
+```
+
+Defining two vectors here one for all analyzed cytokines and one for all analyzed growth factors
+
+```{r}
+# make list of cytokine names and list of growth factor names
+cyts0.0 <- c("IL1b","IL2","IL4","IL5","IL6","IL7","IL8","IL10","IL12p70","IL13","IL17","TNFa","MIP1b","MCP1MCAF","IFNg","GMCSF","GCSF")
+gfs0.0 <- c("IGF1","BDNF","EPO","PDGF_BB","VEGF_A")
+```
+
+
+## Select (and rename) relevant columns
+The relevant columns are  "ID", "Maternal_delivery_data","MAX_ROP","BPD", the dichotomised brain volume variables and "concentrations" (of cytokines and growth factors)
+
+
+```{r}
+clin_outs <- c("Maternal_delivery_data_Other0_Inflammation1_Hypoxia2","MAX_ROP","BPD","GAD","totalBrain","greyMatt","whiteMatt","whiteMatt","centStruct","cereb")
+
+vars_to_select <- c("ID",clin_outs,cyt_names)
+df.0.1 <- df.0.0  %>% 
+  select(all_of(vars_to_select)) # select only columns that will be used
+  
+df.0.2  <- df.0.1 %>% 
+  rename(matInfl = Maternal_delivery_data_Other0_Inflammation1_Hypoxia2) # shorten column name of maternal delivery variable
+
+```
+
+## Recode (and group) values
+So that all samples are divided into 3 groups coded as 1,0 and NA meaning have-, have-not- feature in question and those with missing values.
+```{r}
+# shorten the matInfl entry in the vector used for selecting used columns
+clin_outs <- str_replace(all_of(clin_outs), "Maternal_delivery_data_Other0_Inflammation1_Hypoxia2", "matInfl") 
+
+#df.0.2
+#df1$Sp2[df1$Sp2 == 8] <- 800
+#recode(num_vec, `2` = 20L, `4` = 40L)
+df.0.2.5 <- df.0.2 %>% 
+mutate(MAX_ROP = recode(MAX_ROP, `1` = 0L, `2`=0L, `0`=0L, `3` = 1L),
+       totalBrain = recode(totalBrain, `2` = 1, `1` = 0),
+       greyMatt = recode(greyMatt, `2` = 1, `1` = 0),
+       whiteMatt = recode(whiteMatt, `2` = 1, `1` = 0),
+       centStruct= recode(centStruct, `2` = 1, `1` = 0),
+       cereb = recode(cereb, `1` = 0, `2` = 1)
+)
+# df.0.2.5  %>% select(all_of(clin_outs))
+```
+
+
+
+## Collect clinical outcomes etc in clin_grouping and clin_grouping_val
+Make data longer by collecting clinical outcomes.
+
+### Alternative 1 make one grouped data frame with all groups have and havenot clinical outcome
+```{r}
+df.0.3 <- df.0.2.5 %>% pivot_longer(cols=all_of(clin_outs),names_to="clin_grouping",values_to="clin_grouping_val") %>%
+  na.omit() %>% # remove samples with missing data
+  group_by(clin_grouping,clin_grouping_val) # group by clin_grouping and value of that group
+```
+### Alternative 2 make grouped data frames, one for haves and one for havenots  clinical outcome
+```{r}
+# filter in clin_grouping_val==0 and group by clin_groupings
+df.0.3_0 <- df.0.2.5 %>% pivot_longer(cols=all_of(clin_outs),names_to="clin_grouping",values_to="clin_grouping_val") %>%
+na.omit() %>% 
+filter(clin_grouping_val==0) %>% 
+group_by(clin_grouping) 
+
+# make list of lists of correlation values for clin_groupings, clin_grouping_val==1
+df.0.3_1 <- df.0.2.5 %>% pivot_longer(cols=all_of(clin_outs),names_to="clin_grouping",values_to="clin_grouping_val") %>%
+na.omit() %>% 
+filter(clin_grouping_val==1) %>%  
+group_by(clin_grouping)
+```
+
+
+```{r}
+names(df.0.3) <- names(df.0.3) %>% str_replace(names_suffix,"") # remove information about time point and log from column names
+group_counts <- df.0.3 %>% tally()  # look at sample counts for each value of maternal delivery variable
+
+kbl(group_counts) %>%
+  #kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+  kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+```{r}
+names(df.0.3_0) <- names(df.0.3_0) %>% str_replace(names_suffix,"") # remove information about time point and log from column names
+group_counts_0 <- df.0.3_0 %>% tally()  # look at sample counts for each value of maternal delivery variable
+names(df.0.3_1) <- names(df.0.3_1) %>% str_replace(names_suffix,"") # remove information about time point and log from column names
+group_counts_1 <- df.0.3_1 %>% tally()  # look at sample counts for each value of maternal delivery variable
+kbl(group_counts_0) %>%
+#kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+
+kbl(group_counts_1) %>%
+#kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+## Perform tests of pairwise correlation
+
+Correlation tests are performed within the groups "inflammation" (n=) and "other" (n=) between each pairwise combination within the set of cytokines and growth factors. The results (r,p,n etc) are collected in a list with one entry for each group.
+
+```{r}
+corr_lst.0.0 <- df.0.3 %>% 
+  group_split() %>% # split data frame by clinical grouping and clinical grouping variable
+  map(select,-c("ID","clin_grouping","clin_grouping_val")) %>% # For each group select cytokines and growth factors
+  map(psych::corr.test) # Create a list for each grouping variable with pairwise correlations and probability values between cytokines and growth factors 
+```
+
+### Give names to the list items of the list outputted by corr.test
+```{r}
+names(corr_lst.0.0) <- df.0.3 %>% group_keys() %>% unite(clin_groups,c("clin_grouping","clin_grouping_val")) %>% as.matrix()
+```
+
+## Rerun correlation test but now in separated runs to create separated lists of correlation results for clin_grouping_val==0 and clin_grouping_val==1 
+This was done in order to be able to apply psych::paired.r with purrr:pmap and in order to easily plot triplets of correlation plots for grouping_val 0 and 1 and plots of difference in correlation for each grouping. 
+
+```{r}
+# make list of lists of correlation values for clin_groupings, clin_grouping_val==0
+corr_lst_clin_group_0 <- df.0.3_0 %>% group_split() %>% 
+map(select,-c("ID","clin_grouping","clin_grouping_val")) %>% 
+map(psych::corr.test)
+
+# Give names to the list items of the list outputted by corr.test
+clin_grouping_vec <- df.0.3_0 %>% group_keys() %>% as.matrix()
+clin_group_val_vec_0.0 <- rep("_0",length(clin_grouping_vec ))
+clin_group_val_vec_0.1 <- paste(clin_grouping_vec,clin_group_val_vec_0.0,sep="")
+names(corr_lst_clin_group_0) <- clin_group_val_vec_0.1 
+
+corr_lst_clin_group_0.rval <- list() # make list of only rvals for clin_groupings, clin_grouping_val==0 
+corr_lst_clin_group_0.pval <- list() # make list of only pvals for clin_groupings, clin_grouping_val==0
+corr_lst_clin_group_0.n <- list()  # make list of only number of samples for clin_groupings, clin_grouping_val==0
+for (i in 1:length(corr_lst_clin_group_0)){
+  corr_lst_clin_group_0.rval[[i]] <- corr_lst_clin_group_0[[i]]$r # populate corr_lst_clin_group_0.rval list
+  corr_lst_clin_group_0.pval[[i]] <- corr_lst_clin_group_0[[i]]$p
+  corr_lst_clin_group_0.n[[i]] <- corr_lst_clin_group_0[[i]]$n
+}
+
+# make list of lists of correlation values for clin_groupings, clin_grouping_val==0 
+corr_lst_clin_group_1 <- df.0.3_1 %>% group_split() %>% 
+map(select,-c("ID","clin_grouping","clin_grouping_val")) %>% 
+map(psych::corr.test)
+
+# Give names to the list items of the list outputted by corr.test
+clin_grouping_vec <- df.0.3_1 %>% group_keys() %>% as.matrix()
+clin_group_val_vec_1.0 <- rep("_1",length(clin_grouping_vec ))
+clin_group_val_vec_1.1 <- paste(clin_grouping_vec,clin_group_val_vec_1.0,sep="")
+names(corr_lst_clin_group_1) <- clin_group_val_vec_1.1 
+
+corr_lst_clin_group_1.rval <- list() # make list of only rvals for clin_groupings, clin_grouping_val==1 
+corr_lst_clin_group_1.pval <- list() # make list of only pvals for clin_groupings, clin_grouping_val==1
+corr_lst_clin_group_1.n <- list() # make list of only number of samples for clin_groupings, clin_grouping_val==1
+for (i in 1:length(corr_lst_clin_group_1)){
+  corr_lst_clin_group_1.rval[[i]] <- corr_lst_clin_group_1[[i]]$r # populate corr_lst_clin_group_1.rval list
+  corr_lst_clin_group_1.pval[[i]] <- corr_lst_clin_group_1[[i]]$p
+  corr_lst_clin_group_1.n[[i]] <- corr_lst_clin_group_1[[i]]$n
+}
+
+```
+
+### Give names to the list items of the list outputted by corr.test
+```{r}
+names(corr_lst_clin_group_0.n) <- names(corr_lst_clin_group_0.pval) <- names(corr_lst_clin_group_0.rval) <- names(corr_lst_clin_group_0)
+names(corr_lst_clin_group_1.n) <- names(corr_lst_clin_group_1.pval) <- names(corr_lst_clin_group_1.rval) <- names(corr_lst_clin_group_1)
+```
+
+## Perform tests of differences in pairwise correlation
+Apply psych::paired.r with purrr:pmap 
+```{r}
+
+list.for.pair.r <- list(xy=corr_lst_clin_group_0.rval,xz=corr_lst_clin_group_1.rval,n=corr_lst_clin_group_0.n,n2=corr_lst_clin_group_1.n)
+#group_by(clin_grouping) # group by clin_grouping and value of that group
+#diffTest <- purrr::pmap(corr_lst_clin_group_0.rval,corr_lst_clin_group_1.rval,yz=NULL,corr_lst_clin_group_0.n, corr_lst_clin_group_1.n,psych::paired.r)# yz=NULL,n1, n2# Create a list for each grouping variable with pairwise correlations and probability values between cytokines and growth factors 
+paired_corr.lst <- purrr::pmap(list.for.pair.r,psych::paired.r,yz=NULL)
+
+
+paired_corr.lst.zval <- list()
+paired_corr.lst.pval <- list()
+for (i in 1:length(paired_corr.lst)){
+  paired_corr.lst.zval[[i]] <- paired_corr.lst[[i]]$z # populate paired_corr.lst.zval list
+  paired_corr.lst.pval[[i]] <- paired_corr.lst[[i]]$p
+}
+
+names(paired_corr.lst.zval) <- names(paired_corr.lst.pval) <- sub("_0","",names(corr_lst_clin_group_0.rval))
+```
+
+## Use loop to perform test instead
+Seems to generate identicla results
+```{r}
+diff_in_corr <- list()
+for (i in 1:length(corr_lst_clin_group_0.rval)) {
+diff_in_corr[[i]] <- psych::paired.r(corr_lst_clin_group_0.rval[[i]],
+                                     corr_lst_clin_group_1.rval[[i]],
+                                     yz=NULL,
+                                     corr_lst_clin_group_0.n[[i]], 
+                                     corr_lst_clin_group_1.n[[i]])
+}
+```
+
+
+## Save data objects for following steps
+```{r}
+if (time_span_of_interest=="timepoint_b"){
+  fn ="001_read_and_format_data_and_stat_testing_tpb.RData"
+}else if(time_span_of_interest=="timeinterval_cde"){
+  fn ="001_read_and_format_data_and_stat_testing_ticde.RData"
+}
+```
+
+```{r}
+save(cyts0.0,
+     gfs0.0,
+     clin_outs,
+     group_counts,
+     group_counts_0,
+     group_counts_1,
+     corr_lst.0.0,
+     corr_lst_clin_group_0.rval,
+     corr_lst_clin_group_0.pval,
+     corr_lst_clin_group_0.n,
+     corr_lst_clin_group_1.rval,
+     corr_lst_clin_group_1.pval,
+     corr_lst_clin_group_1.n,
+     paired_corr.lst.zval,
+     paired_corr.lst.pval, 
+     file = paste("./saved_data/",fn, sep=""))
+
+```
+
+```{r}
+  save(time_span_of_interest,
+  file = paste("./saved_data/time_span_of_interest.RData", sep=""))
+```
+

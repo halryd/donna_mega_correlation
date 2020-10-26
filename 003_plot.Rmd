@@ -1,0 +1,184 @@
+---
+title: "Correlation, network and heatmap plots"
+subtitle: "...and finally, the plots"
+date: "`r Sys.Date()`"
+output: html_document
+header-includes: |
+    \usepackage{caption}
+    \usepackage{placeins}
+    \usepackage{subfig}
+---
+## Load R packages
+
+```{r message=FALSE}
+library(tidyverse)
+library(readxl)
+library(stringr)
+library(psych)
+library(gdata)
+library(qgraph)
+library(kableExtra)
+library(ComplexHeatmap)
+library(circlize)
+```
+## Load data from previous steps
+
+```{r}
+load(file = paste("./saved_data/time_span_of_interest.RData", sep=""))
+time_span_of_interest
+```
+
+Step 1
+```{r}
+if (time_span_of_interest=="timepoint_b"){
+  fn ="001_read_and_format_data_and_stat_testing_tpb.RData"
+}else if(time_span_of_interest=="timeinterval_cde"){
+  fn ="001_read_and_format_data_and_stat_testing_ticde.RData"
+}
+
+loaded_objects_from_step_1 = load(file = paste("./saved_data/",fn, sep=""))
+loaded_objects_from_step_1
+```
+
+Step 2
+```{r}
+if (time_span_of_interest=="timepoint_b"){
+  fn ="002_format_results_of_statistical_testing_tpb.RData"
+}else if(time_span_of_interest=="timeinterval_cde"){
+  fn ="002_format_results_of_statistical_testing_ticde.RData"
+}
+loaded_objects_from_step_2 = load(file = paste("./saved_data/",fn, sep=""))
+loaded_objects_from_step_2
+```
+
+
+## Heatmap
+```{r complexHeatmapConc, fig.cap="The color in each cell of this heatmap indicates the level at which a given cytokine or growth factor changes its interaction with other cytokines and growth factors. The color (and intesity) signifies the sum of the significant and standardized z-scores (mesures of change of correlation) for individual cytokines and growth factors.  Each cytokine/growthfactor name found cell is trailed by an underscore and a number. The number indicates how many other cytokines it interacts with so that weather the sum is due to a few big interactions or many small. Cytokines with no significant change in correlation between children with and without clinical outcomeis excluded (grey)"}
+small_mat = as.matrix(ranked_z_tb.0.0)
+#ranked_z_tb.0.0 %>% print(.,n = 50)
+small_mat_text = as.matrix(ranked_peps_tb.0.0)
+max <- max(small_mat)
+min <- min(small_mat)
+col_fun = colorRamp2(c(min,0.01, max), c("lightgrey", "green", "red"))
+Heatmap(small_mat, name = "sum of z-score", col = col_fun,
+show_column_dend = FALSE, show_row_dend = FALSE,
+#width = unit(15, "cm"), height = unit(15, "cm"),
+    cell_fun = function(j, i, x, y, width, height, fill) {
+    if(small_mat[i, j] > 0)
+        grid.text(sprintf("%s", small_mat_text[i, j]), x, y, gp = gpar(fontsize = 7))#%.1f
+})
+```
+
+## Correlation plots with difference in correlation
+For each plot triplet per row there is one plot for group 0 , one for group 1 and one for the difference between 0 and 1
+
+```{r plot corrplots with difference in correlation, out.width = "30%",fig.cap="Some caption",fig.show='hold'}
+for (i in 1:length(corr_lst_clin_group_0.rval)){
+   corrplot::corrplot(corr_lst_clin_group_0.rval[[i]],
+                      tl.pos="td",
+                      tl.col="darkgrey",
+                      mar=c(0,0,1,0),
+                      number.cex=3,
+                      tl.cex=1,  
+                      type="upper",
+                      pch.cex=0.8, 
+                      diag=F,
+                      cl.pos="n",
+                      addgrid.col=NA,
+                      title=paste(group_counts_0$clin_grouping[i],",0, numb samples =  ",corr_lst_clin_group_0.n[[i]],sep=""))
+  
+    corrplot::corrplot(corr_lst_clin_group_1.rval[[i]],
+                      tl.pos="td",
+                      tl.col="darkgrey",
+                      mar=c(0,0,1,0),
+                      number.cex=3,
+                      tl.cex=1,  
+                      type="upper",
+                      pch.cex=0.8, 
+                      diag=F,
+                      cl.pos="n",
+                      addgrid.col=NA,
+                      title=paste(group_counts_1$clin_grouping[i],",1, numb samples =  ",corr_lst_clin_group_1.n[[i]],sep=""))
+    
+    #plot one plot fo rchange in correllation
+    A <- paired_corr.lst.zval[[i]] 
+    #Normalized Data
+    normalized = (A-min(A,na.rm=T))/(max(A,na.rm=T)-min(A,na.rm=T))
+    B <- paired_corr.lst.pval[[i]]
+    sig_element = ifelse(B < 0.05, normalized, NA)
+    sig_element[is.na(sig_element)] <- 0 
+    
+    corrplot::corrplot(sig_element,
+                       tl.pos="td",
+                       tl.col="darkgrey", 
+                       mar=c(0,0,1,0),
+                       number.cex=3,tl.cex=0.8,
+                       type="upper",
+                       pch.cex=0.8, diag=F,cl.pos="n")
+        
+      
+      # Why am I not using cor_diff.lst here?
+      # 
+      # ,cor_diff.lst[[i]]
+      #                 tl.pos="td",
+      #                 tl.col="darkgrey",
+      #                 mar=c(0,0,1,0),
+      #                 number.cex=3,
+      #                 tl.cex=1,  
+      #                 type="upper",
+      #                 pch.cex=0.8, 
+      #                 diag=F,
+      #                 cl.pos="n",
+      #                 addgrid.col=NA,
+      #                 title=paste(group_counts_1$clin_grouping[i],",1vs2",sep="")
+      # 
+
+                 
+}
+
+```
+
+
+## Network plots with difference in correlation
+For each plot triplet per row there is one plot for group 0 , one for group 1 and one for the difference between 0 and 1
+
+```{r plot networks with difference in correlation, out.width = "30%",fig.cap="Some caption",fig.show='hold'}
+#plot maternal delivery "other"
+for (i in 1:length(corr_lst_clin_group_0.rval)){
+  
+  qgraph(sign_corr_lst_clin_group_0[[i]],
+         graph= 'default',
+         layout = "spring",
+         edge.labels = TRUE,
+         palette= "ggplot2",
+         groups=sign_cyts_and_gfs.lst_0[[i]],
+         legend=F,
+         bg='lightgrey',
+         title.cex=1.2,
+         title=paste(group_counts_0$clin_grouping[i],",0, numb samples =  ",corr_lst_clin_group_0.n[[i]],sep=""))
+  
+    qgraph(sign_corr_lst_clin_group_1[[i]],
+         graph= 'default',
+         layout = "spring",
+         edge.labels = TRUE,
+         palette= "ggplot2",
+         groups=sign_cyts_and_gfs.lst_1[[i]],
+         legend=F,
+         bg='lightgrey',
+         title.cex=1.2,
+         title=paste(group_counts_1$clin_grouping[i],",1, numb samples =  ",corr_lst_clin_group_1.n[[i]],sep=""))
+    
+      qgraph(cor_diff.lst[[i]],
+         graph= 'default',
+         layout = "spring",
+         edge.labels = TRUE,
+         palette= "ggplot2",
+         groups=cor_diff_groups.lst[[i]],#sign_cyts_and_gfs.lst_0
+         legend=F,
+         bg='lightgrey',
+         title.cex=1.2,
+         title=paste(group_counts_1$clin_grouping[i],",0vs1",sep=""))
+   
+}
+```
+
